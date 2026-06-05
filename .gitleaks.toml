@@ -1,0 +1,6 @@
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Known false positives"
+paths = ['''tools/issuer-gen/.*\.json''']

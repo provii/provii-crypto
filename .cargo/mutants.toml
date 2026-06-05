@@ -1,0 +1,20 @@
+# cargo-mutants configuration for provii-crypto
+# See: https://mutants.rs/config.html
+
+# Only mutate the pure-logic crates where mutation testing is tractable.
+# Excluded: crypto-circuit-age (circuit synthesis per mutant ~10min),
+#           crypto-prover (depends on circuit), crypto-e2e-tests (integration).
+examine_globs = [
+  "crypto-commons/src/**/*.rs",
+  "crypto-commit/src/**/*.rs",
+  "crypto-sig-redjubjub/src/**/*.rs",
+  "crypto-public-inputs/src/**/*.rs",
+  "crypto-protocol/src/**/*.rs",
+  "crypto-verifier/src/**/*.rs",
+]
+
+# Skip test and benchmark files.
+exclude_globs = ["**/tests/**", "**/benches/**"]
+
+# Exclude Display/Debug fmt impls and error conversions (low-value mutations).
+exclude_re = ["::fmt ->", "impl .*Debug"]

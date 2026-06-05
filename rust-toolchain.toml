@@ -1,0 +1,12 @@
+# Exact toolchain pin for reproducible builds. See provii-verifier/rust-toolchain.toml
+# for rationale. Keep this version IDENTICAL across provii-crypto, provii-issuer,
+# and provii-verifier (this repo's MSRV is the workspace floor: 1.85).
+#
+# ACTION: set `channel` to your validated exact stable (>= 1.88; the worker
+# dependency closure needs 1.88, e.g. `time 0.3.47` via worker-build). Keep in
+# lockstep with provii-issuer and provii-verifier.
+[toolchain]
+channel = "1.88.0"
+components = ["rustfmt", "clippy"]
+targets = ["wasm32-unknown-unknown"]
+profile = "minimal"

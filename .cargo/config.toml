@@ -1,0 +1,10 @@
+# Workspace-wide Cargo configuration for provii-crypto.
+#
+# NOTE: Do not add target-cpu=native here as it breaks reproducible builds
+# and CI cross-compilation. Platform-specific RUSTFLAGS belong in CI env vars.
+
+[build]
+rustdocflags = ["-D", "warnings"]
+
+[doc.extern-map.registries]
+crates-io = "https://docs.rs"

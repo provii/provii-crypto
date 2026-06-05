@@ -1,0 +1,35 @@
+[package]
+name = "provii-crypto-protocol"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "PKCE challenges, nonce generation, and relying party binding for provii-crypto"
+
+[dependencies]
+provii-crypto-commons = { workspace = true }
+sha2.workspace = true
+base64.workspace = true
+zeroize.workspace = true
+rand = { workspace = true, optional = true }
+
+# For WASM/Worker environment
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+worker.workspace = true
+getrandom.workspace = true
+
+# For non-WASM environment
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+rand.workspace = true
+
+[dev-dependencies]
+proptest = "1.7"
+
+[lints]
+workspace = true
+
+[features]
+default = ["std"]
+std = ["rand"]

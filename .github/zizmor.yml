@@ -1,0 +1,57 @@
+# Zizmor configuration for provii-crypto
+#
+# Suppressions for findings that are mitigated in-place or required
+# by the workflow's design.
+
+rules:
+  excessive-permissions:
+    # ci.yml: permissions block is at workflow level for readability;
+    # individual jobs don't need separate narrower blocks.
+    ignore:
+      - ci.yml
+
+  dangerous-triggers:
+    # cla.yml: pull_request_target is required by contributor-assistant
+    # to access secrets and write CLA signature records.
+    ignore:
+      - cla.yml
+
+  template-injection:
+    # fuzz.yml: workflow_dispatch inputs are admin-only (requires write
+    # access to trigger). generate-params.yml and release.yml use step
+    # outputs and github context in non-user-controlled positions.
+    ignore:
+      - fuzz.yml
+      - generate-params.yml
+      - release.yml
+
+  cache-poisoning:
+    # Rust caches (Swatinem/rust-cache) are used across CI, release,
+    # and param generation. Release builds on tags skip cache restore
+    # via explicit if-guards. Non-release builds accept residual risk.
+    ignore:
+      - ci.yml
+      - generate-params.yml
+      - release.yml
+      - sbom.yml
+      - slow-checks.yml
+      - security.yml
+
+  archived-uses:
+    # security.yml: semgrep/semgrep-action is archived but still
+    # functional. Replacement with CLI-based approach is tracked.
+    ignore:
+      - security.yml
+
+  unpinned-uses:
+    # release.yml: SLSA's reusable workflow generator MUST be referenced
+    # by tag per the SLSA spec. The generator validates its own ref and
+    # refuses to run from a SHA pin.
+    ignore:
+      - release.yml
+
+  artipacked:
+    # slow-checks.yml: checkout without persist-credentials:false is
+    # acceptable as no artifacts are uploaded from these jobs.
+    ignore:
+      - slow-checks.yml

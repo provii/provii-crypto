@@ -1,0 +1,29 @@
+[package]
+name = "provii-crypto-commons"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Shared error types, domain separation constants, and credential structures for provii-crypto"
+
+[dependencies]
+blake2.workspace = true
+byteorder.workspace = true
+ed25519-dalek.workspace = true
+hex.workspace = true
+rand_core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+zeroize.workspace = true
+
+[dev-dependencies]
+proptest = "1.7"
+
+[lints]
+workspace = true
+
+[features]
+default = ["std"]
+std = []

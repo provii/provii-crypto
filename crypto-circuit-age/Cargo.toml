@@ -1,0 +1,52 @@
+[package]
+name = "provii-crypto-circuit-age"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Groth16 circuit for Provii age proofs (DOB>=cutoff, Pedersen over Jubjub, in-circuit RedJubjub verify)"
+
+[features]
+default = ["zcash-gadgets"]
+zcash-gadgets = ["sapling-crypto/circuit"]
+
+[dependencies]
+bls12_381.workspace = true
+ff.workspace = true
+group.workspace = true
+jubjub.workspace = true
+rand.workspace = true
+serde.workspace = true
+sapling-crypto.workspace = true
+blake2.workspace = true
+lazy_static.workspace = true
+hex.workspace = true
+zeroize.workspace = true
+
+# Add these for the test example
+provii-crypto-commons.workspace = true
+provii-crypto-commit.workspace = true
+provii-crypto-sig-redjubjub.workspace = true
+provii-crypto-public-inputs.workspace = true
+
+[target.'cfg(any(target_arch = "wasm32", target_os = "android", target_os = "ios"))'.dependencies]
+bellman = { version = "0.14", default-features = false, features = ["groth16"] }
+
+[target.'cfg(all(not(target_arch = "wasm32"), not(any(target_os = "android", target_os = "ios"))))'.dependencies]
+bellman = { version = "0.14", default-features = false, features = [
+  "groth16",
+  "multicore",
+] }
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+rand_core.workspace = true
+clap = { version = "4.5", features = ["derive"] }
+chrono = "0.4"
+serde_json.workspace = true
+proptest = "1.7"
+anyhow.workspace = true

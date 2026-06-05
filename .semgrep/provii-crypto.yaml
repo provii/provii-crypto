@@ -1,0 +1,378 @@
+rules:
+
+  # ============================================================================
+  # RULE 1: RNG without CryptoRng bound
+  # ============================================================================
+  # Functions generating cryptographic material (keys, nonces, randomness for
+  # commitments) MUST require CryptoRng, not just RngCore. A plain RngCore
+  # could be a PRNG like SmallRng, which is catastrophic for key generation.
+  #
+  # Suppress with: // nosemgrep: provii.crypto.rng-without-crypto-bound
+  - id: provii.crypto.rng-without-crypto-bound
+    patterns:
+      - pattern: |
+          fn $FN<$R: RngCore>($PARAM: &mut $R, ...) -> $RET { ... }
+      - pattern-not: |
+          fn $FN<$R: CryptoRng + RngCore>($PARAM: &mut $R, ...) -> $RET { ... }
+      - pattern-not: |
+          fn $FN<$R: RngCore + CryptoRng>($PARAM: &mut $R, ...) -> $RET { ... }
+    paths:
+      exclude:
+        - "**/target/**"
+        - "**/benches/**"
+        - "**/tools/**"
+        - "**/examples/**"
+    message: >
+      Function $FN accepts RngCore without CryptoRng bound. Cryptographic
+      operations must require CryptoRng to prevent use of non-CSPRNG sources.
+      Add `CryptoRng +` to the trait bound.
+    languages: [rust]
+    severity: WARNING
+    metadata:
+      category: security
+      subcategory: cryptographic-misuse
+      cwe: "CWE-338: Use of Cryptographically Weak PRNG"
+
+  # ============================================================================
+  # RULE 2: thread_rng() in non-test code
+  # ============================================================================
+  # Production crypto code should use OsRng directly, not thread_rng().
+  # Uses pattern-not-inside #[test] to avoid flagging inline test modules.
+  - id: provii.crypto.thread-rng-in-production
+    patterns:
+      - pattern: thread_rng()
+      - pattern-not-inside: |
+          #[test]
+          fn $TEST_FN(...) { ... }
+      - pattern-not-inside: |
+          fn $TEST_FN(...) {
+            ...
+            thread_rng()
+            ...
+          }
+    paths:
+      exclude:
+        - "**/target/**"
+        - "**/benches/**"
+        - "**/tools/**"
+        - "**/examples/**"
+        - "**/main.rs"
+    message: >
+      Use OsRng instead of thread_rng() in production crypto code. OsRng draws
+      directly from the OS CSPRNG and makes the entropy source explicit.
+      thread_rng() is acceptable in tests.
+    languages: [rust]
+    severity: INFO
+    metadata:
+      category: security
+      subcategory: cryptographic-misuse
+      cwe: "CWE-338: Use of Cryptographically Weak PRNG"
+
+  # ============================================================================
+  # RULE 3: Debug output in library code (non-test only)
+  # ============================================================================
+  # println!, eprintln!, and dbg! in library code can leak sensitive
+  # cryptographic values. Excludes test functions via pattern-not-inside.
+  - id: provii.crypto.debug-output-in-lib
+    patterns:
+      - pattern-either:
+          - pattern: println!(...)
+          - pattern: eprintln!(...)
+          - pattern: dbg!(...)
+      - pattern-not-inside: |
+          #[test]
+          fn $TEST_FN(...) { ... }
+    paths:
+      exclude:
+        - "**/target/**"
+        - "**/benches/**"
+        - "**/tools/**"
+        - "**/examples/**"
+        - "**/fuzz/**"
+        - "**/main.rs"
+    message: >
+      Debug output (println/eprintln/dbg) in library code may leak
+      cryptographic values. Remove or gate behind a feature flag.
+    languages: [rust]
+    severity: WARNING
+    metadata:
+      category: security
+      subcategory: information-leak
+      cwe: "CWE-532: Insertion of Sensitive Information into Log File"
+
+  # ============================================================================
+  # RULE 4: Unwrap in crypto-critical paths
+  # ============================================================================
+  # Rather than flagging every .unwrap() (too noisy with inline tests),
+  # this targets unwrap/expect on specific crypto operations where failure
+  # would be a security issue: key parsing, signature parsing, proof
+  # deserialization, and hash operations.
+  - id: provii.crypto.unwrap-on-crypto-operation
+    patterns:
+      - pattern-either:
+          - pattern: SigningKey::from_bytes(...).unwrap()
+          - pattern: VerificationKey::from_bytes(...).unwrap()
+          - pattern: Signature::from_bytes(...).unwrap()
+          - pattern: Proof::read(...).unwrap()
+          - pattern: VerifyingKey::read(...).unwrap()
+          - pattern: JubjubScalar::from_bytes(...).unwrap()
+          - pattern: SubgroupPoint::from_bytes(...).unwrap()
+      - pattern-not-inside: |
+          #[test]
+          fn $TEST_FN(...) { ... }
+    paths:
+      exclude:
+        - "**/target/**"
+        - "**/benches/**"
+        - "**/tools/**"
+        - "**/examples/**"
+    message: >
+      Unwrap on cryptographic deserialization (key/signature/proof parsing).
+      External input can cause this to panic. Use ? or match instead.
+    languages: [rust]
+    severity: ERROR
+    metadata:
+      category: correctness
+      subcategory: panic-safety
+      cwe: "CWE-248: Uncaught Exception"
+
+  # ============================================================================
+  # RULE 5: Hardcoded 32-byte hex constants that might be key material
+  # ============================================================================
+  # Flag hex-encoded 32-byte arrays that could be hardcoded keys or secrets.
+  # Generator point constants are expected and should be suppressed.
+  - id: provii.crypto.hardcoded-key-candidate
+    pattern-regex: '(?:let|const|static)\s+\w*(?:key|secret|priv|sk|seed)\w*\s*(?::\s*\[[^\]]+\])?\s*=\s*\[0x[0-9a-fA-F]{2}(?:,\s*0x[0-9a-fA-F]{2}){15,}'
+    paths:
+      exclude:
+        - "**/target/**"
+        - "**/tools/**"
+        - "**/examples/**"
+    message: >
+      Possible hardcoded key material detected. Cryptographic keys and seeds
+      must not be hardcoded in source. Use environment variables, KV storage,
+      or key derivation. If this is a generator point constant, suppress with
+      nosemgrep.
+    languages: [rust]
+    severity: ERROR
+    metadata:
+      category: security
+      subcategory: hardcoded-credentials
+      cwe: "CWE-798: Use of Hard-coded Credentials"
+
+  # ============================================================================
+  # RULE 6: Unsafe code blocks
+  # ============================================================================
+  # All provii-crypto crates use #![forbid(unsafe_code)] except
+  # crypto-sig-redjubjub (justified Zeroize impl). Flag any unsafe block.
+  - id: provii.crypto.unsafe-usage
+    pattern: unsafe { ... }
+    paths:
+      exclude:
+        - "**/target/**"
+        - "**/benches/**"
+        - "**/tools/**"
+        - "**/examples/**"
+    message: >
+      Unsafe code in provii-crypto requires explicit justification. All crates
+      use #![forbid(unsafe_code)] except crypto-sig-redjubjub (Zeroize impl).
+      Add a SAFETY comment and suppress with // nosemgrep: provii.crypto.unsafe-usage
+    languages: [rust]
+    severity: ERROR
+    metadata:
+      category: security
+      subcategory: memory-safety
+      cwe: "CWE-119: Improper Restriction of Operations within Memory Buffer"
+
+  # ============================================================================
+  # RULE 7: Non-constant-time equality on secret byte arrays
+  # ============================================================================
+  # Direct == on variables with names suggesting secrets/MACs/tokens.
+  # Jubjub point/scalar equality is constant-time (handled by ff/group).
+  # This catches raw byte array comparisons that bypass those types.
+  - id: provii.crypto.non-ct-byte-comparison
+    pattern-regex: '(?:signature|hmac|mac_tag|token|secret|auth_tag)\w*\s*==\s*(?:signature|hmac|mac_tag|token|secret|auth_tag)'
+    paths:
+      exclude:
+        - "**/target/**"
+        - "**/tools/**"
+        - "**/examples/**"
+    message: >
+      Direct == comparison on values that appear to be secrets or MACs.
+      Use subtle::ConstantTimeEq (ct_eq) to prevent timing side-channels.
+    languages: [rust]
+    severity: ERROR
+    metadata:
+      category: security
+      subcategory: timing-attack
+      cwe: "CWE-208: Observable Timing Discrepancy"
+
+  # ============================================================================
+  # RULE 8: Hash without domain separation
+  # ============================================================================
+  # All hash operations in provii-crypto MUST include a domain separation tag
+  # as the first input. Catches Sha256::new() followed by .update() with
+  # a variable (not a constant DST) as the first call.
+  - id: provii.crypto.hash-without-domain-separation
+    patterns:
+      - pattern: |
+          let mut $H = Sha256::new();
+          $H.update($DATA);
+      - pattern-not: |
+          let mut $H = Sha256::new();
+          $H.update($CONST);
+          ...
+      - metavariable-regex:
+          metavariable: $DATA
+          regex: '(?!b"|CRED_DST|CHALLENGE_DST|CHALLENGE_SIG_DST|CHALLENGE_ID_DST|NULLIFIER_DST|ISSUANCE_CONSENT_DST|REDJUBJUB_PERSONALIZATION|REDJUBJUB_NONCE_TAG|DOB_ATTESTATION_DST)'
+      - pattern-not-inside: |
+          #[test]
+          fn $TEST_FN(...) { ... }
+    paths:
+      exclude:
+        - "**/target/**"
+        - "**/tools/**"
+        - "**/examples/**"
+    message: >
+      Hash operation may lack domain separation. All hashing in provii-crypto
+      must prepend a domain separation tag (DST) as the first update() call.
+      Use a const DST like CRED_V2_DST, CHALLENGE_DST, etc.
+    languages: [rust]
+    severity: WARNING
+    metadata:
+      category: security
+      subcategory: cryptographic-misuse
+      cwe: "CWE-327: Use of a Broken or Risky Cryptographic Algorithm"
+
+  # ============================================================================
+  # RULE 9: Secret key bytes in format strings
+  # ============================================================================
+  # Structs containing secret key material must not have their secrets
+  # formatted into strings via format!/println!/log macros.
+  - id: provii.crypto.secret-in-format-string
+    pattern-either:
+      - pattern: format!($FMT, ..., $SK.scalar, ...)
+      - pattern: format!($FMT, ..., $SK.to_bytes(), ...)
+    paths:
+      exclude:
+        - "**/target/**"
+        - "**/tools/**"
+        - "**/examples/**"
+    message: >
+      Formatting secret key material (scalar, to_bytes()) into a string.
+      This may leak key bytes via logs, errors, or debug output.
+    languages: [rust]
+    severity: ERROR
+    metadata:
+      category: security
+      subcategory: information-leak
+      cwe: "CWE-532: Insertion of Sensitive Information into Log File"
+
+  # ============================================================================
+  # RULE 10: Struct with secret field missing Zeroize
+  # ============================================================================
+  # Regex-based check for structs that hold secret material. Manual review
+  # needed to confirm Zeroize is implemented (regex can't check this).
+  - id: provii.crypto.secret-struct-no-zeroize
+    pattern-regex: 'pub\s+struct\s+\w+\s*\{[^}]*(?:scalar|signing_key|secret_key|private_key|master_key|seed)\s*:'
+    paths:
+      exclude:
+        - "**/target/**"
+        - "**/tools/**"
+        - "**/examples/**"
+    message: >
+      Struct appears to hold secret material (scalar, signing_key, secret_key,
+      private_key, master_key, or seed field). Ensure it implements Zeroize +
+      Drop. See SigningKey in crypto-sig-redjubjub for the pattern.
+      Suppress with nosemgrep if Zeroize is already implemented.
+    languages: [rust]
+    severity: ERROR
+    metadata:
+      category: security
+      subcategory: memory-safety
+      cwe: "CWE-244: Improper Clearing of Heap Memory Before Release"
+
+  # ============================================================================
+  # RULE 11: Deprecated or weak crypto algorithms
+  # ============================================================================
+  # MD5 and SHA-1 must never be used. AES-CBC without authentication flagged.
+  - id: provii.crypto.weak-algorithm
+    pattern-either:
+      - pattern: Md5::new()
+      - pattern: Sha1::new()
+      - pattern: md5::compute(...)
+      - pattern: use md5
+      - pattern: use sha1
+      - pattern: "AesCbc"
+      - pattern: create_cipher(...)
+    message: >
+      Weak or deprecated cryptographic algorithm detected. MD5 and SHA-1
+      must not be used. Use Blake2s-256, SHA-256, or Blake2b as appropriate.
+    languages: [rust]
+    severity: ERROR
+    metadata:
+      category: security
+      subcategory: cryptographic-misuse
+      cwe: "CWE-328: Use of Weak Hash"
+
+  # ============================================================================
+  # RULE 12: panic! / todo! / unimplemented! in library code
+  # ============================================================================
+  # Explicit panic macros in non-test library code. More targeted than
+  # catching every assert (which fires massively on inline test modules).
+  - id: provii.crypto.explicit-panic-in-lib
+    patterns:
+      - pattern-either:
+          - pattern: panic!(...)
+          - pattern: todo!(...)
+          - pattern: unimplemented!(...)
+      - pattern-not-inside: |
+          #[test]
+          fn $TEST_FN(...) { ... }
+    paths:
+      exclude:
+        - "**/target/**"
+        - "**/benches/**"
+        - "**/tools/**"
+        - "**/examples/**"
+        - "**/fuzz/**"
+        - "**/main.rs"
+    message: >
+      Explicit panic/todo/unimplemented in library code. This will crash
+      Workers and mobile apps. Return a Result with an appropriate error.
+    languages: [rust]
+    severity: ERROR
+    metadata:
+      category: correctness
+      subcategory: panic-safety
+      cwe: "CWE-248: Uncaught Exception"
+
+  # ============================================================================
+  # RULE 13: Logging or tracing secret-named variables
+  # ============================================================================
+  - id: provii.crypto.logging-secrets
+    patterns:
+      - pattern-either:
+          - pattern: log::info!($FMT, ..., $SK, ...)
+          - pattern: log::debug!($FMT, ..., $SK, ...)
+          - pattern: log::warn!($FMT, ..., $SK, ...)
+          - pattern: log::error!($FMT, ..., $SK, ...)
+          - pattern: tracing::info!($FMT, ..., $SK, ...)
+          - pattern: tracing::debug!($FMT, ..., $SK, ...)
+      - metavariable-regex:
+          metavariable: $SK
+          regex: '(?i).*(?:secret|scalar|signing_key|private_key|sk_|seed|nonce|hmac|master_key).*'
+    paths:
+      exclude:
+        - "**/target/**"
+        - "**/tools/**"
+        - "**/examples/**"
+    message: >
+      Log statement may include sensitive cryptographic material. Ensure
+      that signing keys, scalars, nonces, and secrets are never logged.
+    languages: [rust]
+    severity: WARNING
+    metadata:
+      category: security
+      subcategory: information-leak
+      cwe: "CWE-532: Insertion of Sensitive Information into Log File"

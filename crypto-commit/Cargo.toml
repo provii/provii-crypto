@@ -1,0 +1,27 @@
+[package]
+name = "provii-crypto-commit"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Pedersen commitments and nullifiers over the Jubjub curve for provii-crypto"
+
+[dependencies]
+provii-crypto-commons.workspace = true
+rand_core.workspace = true
+rand.workspace = true
+zeroize.workspace = true
+
+group.workspace = true
+
+sapling-crypto.workspace = true
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+rand_chacha = "0.3"
+proptest = "1.7"
+hex.workspace = true

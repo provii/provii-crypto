@@ -1,0 +1,57 @@
+# Rust/Cargo build artifacts
+target/
+
+# Coverage files
+*.profraw
+*.profdata
+tarpaulin-report.html
+cobertura.xml
+
+# Backup files
+**/*.rs.bk
+*.orig
+
+# IDE files
+.idea/
+*.swp
+*.swo
+.vscode/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Test artifacts
+proptest-regressions/
+mutants.out/
+mutants.out.old/
+
+# Debug files
+*.pdb
+
+# Sensitive - DO NOT COMMIT generated keys or key material
+*.key
+*.pem
+*_secret*
+*_private*
+issuer_keys*
+keypair*
+
+# Ignore any output files in keygen tool directory
+tools/keygen/*.json
+tools/keygen/*.txt
+tools/keygen/*.key
+
+# Generated proving/verification keys
+*.bin
+*.manifest.json
+vk.*.bin
+age_pk.*.bin
+# Verification keys are exception: small (~1.7 KB), constant per circuit
+# shape, and required by spec_vectors + downstream verifiers in CI. They
+# are not secret and committing them avoids the bootstrapping problem
+# where CI cannot run params-dependent tests until generate-params has
+# fired.
+!age_vk.*.bin
+# Cloudflare Workers / wrangler local dev state
+.wrangler/

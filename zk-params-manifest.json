@@ -1,0 +1,32 @@
+{
+  "backend": "bls12_381",
+  "bellman_version": "0.14.0",
+  "circuit_constants_hash": "9dbbab7e903507b182d1d33f47c72b004e0ffb1bee2cd5ac55e7cbe060338f22",
+  "expected_public_inputs": 8,
+  "generated_at": "2026-05-30T09:04:28.552599+00:00",
+  "optimizations": {
+    "direction": "unified circuit with direction bit public input",
+    "issuer_vk": "direct bytes (no hash)",
+    "nullifier": "Pedersen-based",
+    "rp_hash": "computed off-circuit"
+  },
+  "pk_blake2s_hash": "375e8913b13e234b660bf24995856c7ee59d8fc24462312714e6eebac63c745e",
+  "pk_filename": "age_pk.914153247.bin",
+  "pk_size_bytes": 51844344,
+  "pk_url": "https://cdn.provii.app/age_pk.914153247.bin",
+  "query_lengths": {
+    "ic_len": 9,
+    "note": "Other query lengths (a, b_g1, b_g2, h, l) are private in Parameters struct"
+  },
+  "shape": {
+    "constraints": 99083,
+    "kid_bytes": 14,
+    "public_inputs": 8,
+    "schema_bytes": 12
+  },
+  "vk_blake2b512_hash": "0aed1bda4ad79cd0c166976c5ee3f2bd1f9ca983ba8af5a7c45224003a356eac6acc61209250fd08e4835994147ca2ebc8b5e3fb6abdbbaaf2cccab566bedc0a",
+  "vk_filename": "age_vk.914153247.bin",
+  "vk_fingerprint_blake2s": "3491e619259f47b7c5b3b82ed6f71a3bf62a6c2e5a5e9349163e8c0e94c73644",
+  "vk_id": 914153247,
+  "vk_size_bytes": 1732
+}

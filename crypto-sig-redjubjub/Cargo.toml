@@ -1,0 +1,40 @@
+[package]
+name = "provii-crypto-sig-redjubjub"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "RedJubjub signature scheme on the Jubjub prime-order subgroup for provii-crypto"
+
+[dependencies]
+provii-crypto-commons.workspace = true
+jubjub.workspace = true
+ff.workspace = true
+group.workspace = true
+blake2.workspace = true
+blake2s_simd.workspace = true
+thiserror.workspace = true
+rand.workspace = true
+hex.workspace = true
+zeroize.workspace = true
+subtle.workspace = true
+[dev-dependencies]
+rand_chacha = "0.3"
+criterion.workspace = true
+proptest = "1.7"
+
+[lints]
+workspace = true
+
+[features]
+default = ["std"]
+std = []
+# Enables an atomic counter that tracks zeroize invocations. Used exclusively
+# by integration tests to kill mutants that replace Zeroize/Drop with no-ops.
+test-zeroize-counter = []
+
+[[test]]
+name = "zeroize_invocation"
+required-features = ["test-zeroize-counter"]

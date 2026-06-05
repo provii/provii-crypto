@@ -1,0 +1,173 @@
+name: Slow Checks
+
+on:
+  schedule:
+    - cron: '0 4 * * 1'  # Weekly on Monday at 4am UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  CARGO_INCREMENTAL: 0
+  CARGO_NET_RETRY: 10
+  RUSTUP_MAX_RETRIES: 10
+
+jobs:
+  test-coverage:
+    name: Test Coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@b3b07ba8b418998c39fb20f53e8b695cdcc8de1b # stable
+        with:
+          toolchain: stable
+          components: llvm-tools-preview
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          shared-key: "slow-coverage"
+
+      - name: Install cargo-llvm-cov
+        run: cargo install cargo-llvm-cov --locked --force
+
+      - name: Generate coverage report
+        run: |
+          cargo llvm-cov --workspace --locked --lcov --output-path lcov.info
+
+      - name: Check coverage threshold
+        run: |
+          # Extract line coverage from the lcov.info we already generated
+          # (avoids a second full workspace build via --summary-only).
+          LINES_FOUND=$(grep -c '^DA:' lcov.info || echo 0)
+          COVERED=$(grep '^DA:' lcov.info | awk -F, '$2 > 0' | wc -l | tr -d ' ' || echo 0)
+
+          if [[ "$LINES_FOUND" -eq 0 ]]; then
+            echo "::error::No coverage data found in lcov.info"
+            exit 1
+          fi
+
+          COVERAGE=$(echo "scale=1; $COVERED * 100 / $LINES_FOUND" | bc)
+          echo "Coverage: ${COVERAGE}% ($COVERED/$LINES_FOUND lines)"
+
+          THRESHOLD=85
+          PASS=$(echo "$COVERAGE >= $THRESHOLD" | bc)
+          if [[ "$PASS" -ne 1 ]]; then
+            echo "::error::Coverage ${COVERAGE}% is below threshold of ${THRESHOLD}%"
+            exit 1
+          else
+            echo "Coverage ${COVERAGE}% meets threshold of ${THRESHOLD}%"
+          fi
+
+  # Miri runs each crate as a separate parallel matrix job so no single
+  # crate can blow the per-job timeout. The five crates below are scoped to
+  # those with actual unsafe code and the lightweight utility crates.
+  #
+  # Excluded crates (not in the matrix):
+  #   crypto-prover, crypto-circuit-age: ZK proving operations (bellman /
+  #     groth16 field arithmetic) take hours under Miri's interpreter and
+  #     contain no unsafe code of their own.
+  #   crypto-protocol: the commitment and proof flows it exercises interpret
+  #     Jubjub/BLS field arithmetic that runs past three hours under Miri (it
+  #     overran a 180-minute budget). It contains no unsafe code of its own,
+  #     and the UB-relevant primitives it builds on (crypto-commit,
+  #     crypto-sig-redjubjub, crypto-commons) are each Miri-validated in their
+  #     own matrix legs.
+  #   crypto-e2e-tests: wraps the prover so inherits the same cost.
+  #
+  # crypto-sig-redjubjub is the primary target: it has the only two unsafe
+  # blocks in the workspace (zeroisation via from_raw_parts_mut + volatile
+  # writes).
+  #
+  # Proptest tests (prop_*) are skipped in every leg: they exercise logic
+  # correctness via randomised inputs, not UB detection. Under Miri's
+  # interpreter each proptest case is 100-1000x slower (generating random
+  # values, shrinking, etc.), turning a 60-minute budget into days. The
+  # non-proptest unit tests already cover the unsafe code paths that Miri
+  # needs to validate.
+  miri:
+    name: Miri (${{ matrix.package }})
+    runs-on: ubuntu-latest
+    # 120 min: the curve-arithmetic crates (commit ~45 min, sig-redjubjub ~70
+    # min) interpret Jubjub/BLS field operations under Miri, which is far slower
+    # than native. Each crate runs as its own parallel job so the budget is
+    # per-crate; the lightweight crates finish in minutes.
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        package:
+          - provii-crypto-commons
+          - provii-crypto-commit
+          - provii-crypto-sig-redjubjub
+          - provii-crypto-public-inputs
+          - provii-crypto-verifier
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      # Pin a DATED nightly that actually ships the miri component. A bare
+      # `toolchain: nightly` resolves to the runner's pre-installed nightly and
+      # --allow-downgrade is then a no-op, so when the latest nightly lacks miri
+      # (e.g. 1.88.0 on 2026-06-08) the install fails. The rustup component
+      # history reports the most recent nightly with miri available.
+      - name: Determine latest nightly with Miri
+        id: miri-nightly
+        run: |
+          set -euo pipefail
+          DATE=$(curl -sSf https://rust-lang.github.io/rustup-components-history/x86_64-unknown-linux-gnu/miri)
+          if ! printf '%s' "$DATE" | grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'; then
+            echo "Unexpected miri history response: '$DATE'" >&2
+            exit 1
+          fi
+          echo "toolchain=nightly-$DATE" >> "$GITHUB_OUTPUT"
+
+      - name: Install Rust nightly with Miri
+        uses: dtolnay/rust-toolchain@b3b07ba8b418998c39fb20f53e8b695cdcc8de1b # stable
+        with:
+          toolchain: ${{ steps.miri-nightly.outputs.toolchain }}
+          components: miri
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          shared-key: "slow-miri-${{ matrix.package }}"
+
+      # rust-toolchain.toml pins the directory toolchain to stable 1.88.0, which
+      # would override the nightly installed above (miri is nightly-only).
+      # RUSTUP_TOOLCHAIN takes precedence over the toolchain file, forcing the
+      # miri commands onto the dated nightly that ships the component.
+      - name: Setup Miri
+        run: cargo miri setup
+        env:
+          RUSTUP_TOOLCHAIN: ${{ steps.miri-nightly.outputs.toolchain }}
+
+      - name: Run Miri
+        run: |
+          cargo miri test \
+            --package ${{ matrix.package }} \
+            -- --skip prop_
+        env:
+          MIRIFLAGS: -Zmiri-disable-isolation
+          RUSTUP_TOOLCHAIN: ${{ steps.miri-nightly.outputs.toolchain }}

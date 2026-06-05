@@ -1,0 +1,20 @@
+# Provii Crypto - Code Ownership
+
+* @tim-maelstrom
+
+/crypto-commons/src/ @tim-maelstrom
+/crypto-sig-redjubjub/src/ @tim-maelstrom
+/crypto-commit/src/ @tim-maelstrom
+/crypto-circuit-age/src/ @tim-maelstrom
+/crypto-prover/src/ @tim-maelstrom
+/crypto-verifier/src/ @tim-maelstrom
+/crypto-protocol/src/ @tim-maelstrom
+/crypto-public-inputs/src/ @tim-maelstrom
+/crypto-e2e-tests/ @tim-maelstrom
+/fuzz/ @tim-maelstrom
+/tools/ @tim-maelstrom
+
+/.github/ @tim-maelstrom
+Cargo.toml @tim-maelstrom
+Cargo.lock @tim-maelstrom
+deny.toml @tim-maelstrom

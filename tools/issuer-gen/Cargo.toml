@@ -1,0 +1,29 @@
+[package]
+name = "issuer-gen"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Interactive CLI for generating issuer identity and RedJubjub signing keys"
+
+[[bin]]
+name = "issuer-gen"
+path = "src/main.rs"
+
+[dependencies]
+provii-crypto-sig-redjubjub = { workspace = true }
+provii-crypto-commons = { workspace = true }
+base64.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+chrono = "0.4"
+rand.workspace = true
+clap = { version = "4", features = ["derive"] }
+dialoguer = "0.11"
+zeroize.workspace = true
+
+[lints]
+workspace = true

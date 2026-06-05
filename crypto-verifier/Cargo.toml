@@ -1,0 +1,33 @@
+[package]
+name = "provii-crypto-verifier"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Groth16 zero-knowledge proof verification for provii-crypto age proofs"
+
+[dependencies]
+provii-crypto-public-inputs.workspace = true
+provii-crypto-commons.workspace = true
+bls12_381.workspace = true
+ff.workspace = true
+once_cell.workspace = true
+blake2.workspace = true
+hex.workspace = true
+
+[target.'cfg(any(target_arch = "wasm32", target_os = "android", target_os = "ios"))'.dependencies]
+bellman = { version = "0.14", default-features = false, features = ["groth16"] }
+
+[target.'cfg(all(not(target_arch = "wasm32"), not(any(target_os = "android", target_os = "ios"))))'.dependencies]
+bellman = { version = "0.14", default-features = false, features = [
+  "groth16",
+  "multicore",
+] }
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+proptest = "1.7"

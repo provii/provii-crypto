@@ -1,0 +1,207 @@
+[package]
+name = "provii-crypto-commons-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+arbitrary = { version = "1", features = ["derive"] }
+sha2 = "0.10"
+serde_json = "1.0"
+hex = "0.4"
+ed25519-dalek = "2"
+
+[dependencies.provii-crypto-commons]
+path = "../crypto-commons"
+
+[dependencies.provii-crypto-sig-redjubjub]
+path = "../crypto-sig-redjubjub"
+
+[dependencies.provii-crypto-public-inputs]
+path = "../crypto-public-inputs"
+
+[dependencies.provii-crypto-verifier]
+path = "../crypto-verifier"
+
+[dependencies.provii-crypto-commit]
+path = "../crypto-commit"
+
+[dependencies.provii-crypto-protocol]
+path = "../crypto-protocol"
+
+[[bin]]
+name = "fuzz_sig_verify"
+path = "fuzz_targets/fuzz_sig_verify.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_public_inputs"
+path = "fuzz_targets/fuzz_public_inputs.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_proof_verify"
+path = "fuzz_targets/fuzz_proof_verify.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_commit"
+path = "fuzz_targets/fuzz_commit.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_protocol"
+path = "fuzz_targets/fuzz_protocol.rs"
+test = false
+doc = false
+bench = false
+
+# New fuzzing targets - crypto-protocol module
+
+[[bin]]
+name = "fuzz_protocol_code_challenge"
+path = "fuzz_targets/fuzz_protocol_code_challenge.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_protocol_origin_hash"
+path = "fuzz_targets/fuzz_protocol_origin_hash.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_protocol_rp_challenge"
+path = "fuzz_targets/fuzz_protocol_rp_challenge.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_protocol_replay_tag"
+path = "fuzz_targets/fuzz_protocol_replay_tag.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_protocol_issuance_consent"
+path = "fuzz_targets/fuzz_protocol_issuance_consent.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_protocol_write_length_prefixed"
+path = "fuzz_targets/fuzz_protocol_write_length_prefixed.rs"
+test = false
+doc = false
+bench = false
+
+# New fuzzing targets - crypto-commons module
+
+[[bin]]
+name = "fuzz_commons_vec_to_array32"
+path = "fuzz_targets/fuzz_commons_vec_to_array32.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_commons_cred_prehash"
+path = "fuzz_targets/fuzz_commons_cred_prehash.rs"
+test = false
+doc = false
+bench = false
+
+# New fuzzing targets - crypto-public-inputs module
+
+[[bin]]
+name = "fuzz_public_inputs_bits_le"
+path = "fuzz_targets/fuzz_public_inputs_bits_le.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_public_inputs_assemble"
+path = "fuzz_targets/fuzz_public_inputs_assemble.rs"
+test = false
+doc = false
+bench = false
+
+# New fuzzing targets - crypto-verifier module
+
+[[bin]]
+name = "fuzz_verifier_load_vk"
+path = "fuzz_targets/fuzz_verifier_load_vk.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_nonce_operations"
+path = "fuzz_targets/fuzz_nonce_operations.rs"
+test = false
+doc = false
+bench = false
+
+# New fuzzing targets - serialization and utilities
+
+[[bin]]
+name = "fuzz_serialization_structs"
+path = "fuzz_targets/fuzz_serialization_structs.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_blake2s_hashing"
+path = "fuzz_targets/fuzz_blake2s_hashing.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_hex_encoding"
+path = "fuzz_targets/fuzz_hex_encoding.rs"
+test = false
+doc = false
+bench = false
+
+# Fuzz targets for attestation deserialization and key parsing
+
+[[bin]]
+name = "fuzz_attestation_deser"
+path = "fuzz_targets/fuzz_attestation_deser.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_redjubjub_key_parsing"
+path = "fuzz_targets/fuzz_redjubjub_key_parsing.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_attestation_create"
+path = "fuzz_targets/fuzz_attestation_create.rs"
+test = false
+doc = false
+bench = false

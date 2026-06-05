@@ -1,0 +1,172 @@
+name: Mutation Testing
+
+on:
+  schedule:
+    - cron: '0 5 * * 1'  # Weekly on Monday at 5am UTC (after slow-checks at 4am)
+  pull_request:
+    branches: [main]
+    paths:
+      - 'crypto-commons/src/**'
+      - 'crypto-commit/src/**'
+      - 'crypto-sig-redjubjub/src/**'
+      - 'crypto-public-inputs/src/**'
+      - 'crypto-protocol/src/**'
+      - 'crypto-verifier/src/**'
+      - 'mutants.toml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  CARGO_INCREMENTAL: 0
+  CARGO_NET_RETRY: 10
+  RUSTUP_MAX_RETRIES: 10
+
+jobs:
+  mutants:
+    name: Mutation Testing
+    if: github.actor != 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@b3b07ba8b418998c39fb20f53e8b695cdcc8de1b # stable
+        with:
+          toolchain: stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          shared-key: "ci-mutants"
+
+      - name: Install cargo-mutants
+        run: cargo install cargo-mutants --locked
+
+      - name: Determine mutant scope
+        id: scope
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            # On PRs, only mutate files that changed
+            CHANGED=$(git diff --name-only origin/main...HEAD -- \
+              'crypto-commons/src/**/*.rs' \
+              'crypto-commit/src/**/*.rs' \
+              'crypto-sig-redjubjub/src/**/*.rs' \
+              'crypto-public-inputs/src/**/*.rs' \
+              'crypto-protocol/src/**/*.rs' \
+              'crypto-verifier/src/**/*.rs' \
+              | tr '\n' ',' | sed 's/,$//')
+            if [[ -z "$CHANGED" ]]; then
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              echo "No mutatable source files changed"
+            else
+              echo "skip=false" >> "$GITHUB_OUTPUT"
+              echo "files=$CHANGED" >> "$GITHUB_OUTPUT"
+            fi
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "files=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run cargo-mutants (full — scoped to core crates)
+        if: steps.scope.outputs.skip != 'true' && steps.scope.outputs.files == ''
+        # Full-scope scheduled/dispatch runs cover the six core library
+        # crates. crypto-prover and crypto-circuit-age are excluded: both
+        # contain heavy ZK proving that makes each mutant build+test cycle
+        # exceed 5 minutes, pushing the full run well past the 3-hour
+        # timeout. crypto-e2e-tests and tools are integration/CLI wrappers
+        # with no independent mutation surface. Per-mutant timeout (300 s)
+        # catches any single test that hangs.
+        #
+        # Exit codes: 0 = all caught, 2 = some survived. The score gate
+        # below is authoritative for survivors, so exit 2 is not a job
+        # failure here. Any other code (1 = usage, 4 = baseline failed)
+        # is a genuine failure.
+        run: |
+          set +e
+          cargo mutants \
+            --package provii-crypto-commons \
+            --package provii-crypto-commit \
+            --package provii-crypto-sig-redjubjub \
+            --package provii-crypto-public-inputs \
+            --package provii-crypto-protocol \
+            --package provii-crypto-verifier \
+            --timeout 300 \
+            --jobs 2 \
+            -- --locked
+          ec=$?
+          set -e
+          if [ "$ec" -ne 0 ] && [ "$ec" -ne 2 ]; then
+            echo "::error::cargo-mutants exited $ec (build or baseline failure, not surviving mutants)"
+            exit "$ec"
+          fi
+
+      - name: Run cargo-mutants (incremental)
+        if: steps.scope.outputs.skip != 'true' && steps.scope.outputs.files != ''
+        # Exit codes: same as above. exit 2 = survivors, tolerated here.
+        run: |
+          set +e
+          IFS=',' read -ra FILES <<< "${{ steps.scope.outputs.files }}"
+          FILE_ARGS=""
+          for f in "${FILES[@]}"; do
+            FILE_ARGS="$FILE_ARGS --file $f"
+          done
+          cargo mutants --workspace --timeout 300 --jobs 2 $FILE_ARGS -- --locked
+          ec=$?
+          set -e
+          if [ "$ec" -ne 0 ] && [ "$ec" -ne 2 ]; then
+            echo "::error::cargo-mutants exited $ec (build or baseline failure, not surviving mutants)"
+            exit "$ec"
+          fi
+
+      - name: Check mutation score threshold
+        if: steps.scope.outputs.skip != 'true'
+        run: |
+          OUTCOMES="mutants.out/outcomes.json"
+          if [[ ! -f "$OUTCOMES" ]]; then
+            echo "No outcomes file found. cargo-mutants may have found no mutants"
+            exit 0
+          fi
+
+          TOTAL=$(jq '[.outcomes[] | select(.scenario != "Baseline")] | length' "$OUTCOMES")
+          CAUGHT=$(jq '[.outcomes[] | select(.scenario != "Baseline") | select(.summary == "CaughtMutant")] | length' "$OUTCOMES")
+
+          if [[ "$TOTAL" -eq 0 ]]; then
+            echo "No mutants generated"
+            exit 0
+          fi
+
+          SCORE=$(echo "scale=1; $CAUGHT * 100 / $TOTAL" | bc)
+          echo "Mutation score: ${SCORE}% ($CAUGHT/$TOTAL mutants caught)"
+
+          # Break threshold: 70% (crypto library standard)
+          THRESHOLD=70
+          PASS=$(echo "$SCORE >= $THRESHOLD" | bc)
+          if [[ "$PASS" -ne 1 ]]; then
+            echo "::error::Mutation score ${SCORE}% is below threshold of ${THRESHOLD}%"
+            exit 1
+          fi
+
+      - name: Upload mutation report
+        if: always() && steps.scope.outputs.skip != 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mutation-report
+          path: mutants.out/
+          retention-days: 14

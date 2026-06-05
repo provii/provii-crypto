@@ -1,0 +1,273 @@
+name: Generate ZK Parameters
+
+on:
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: 'Reason for regenerating ZK parameters'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: generate-params-${{ github.run_id }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  WRANGLER_VERSION: '4.92.0'
+
+jobs:
+  generate:
+    name: Generate Parameters
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      HAS_CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN != '' }}
+    permissions:
+      contents: write
+      id-token: write
+    outputs:
+      vk_id: ${{ steps.extract-vk-id.outputs.vk_id }}
+      manifest_artifact_name: ${{ steps.upload-manifest.outputs.artifact-name }}
+      has_pat: ${{ steps.check-pat.outputs.has_pat }}
+    steps:
+      - name: Check PAT availability
+        id: check-pat
+        env:
+          HAS_PAT: ${{ secrets.PROVII_PAT != '' }}
+        run: echo "has_pat=${HAS_PAT}" >> "$GITHUB_OUTPUT"
+
+
+      - name: Harden Runner
+        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@b3b07ba8b418998c39fb20f53e8b695cdcc8de1b # stable
+        with:
+          toolchain: stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          shared-key: "generate-params"
+
+      - name: Generate ZK parameters
+        run: cargo run --release --example gen_params
+
+      - name: Move artifacts to release-artifacts directory
+        run: |
+          mkdir -p release-artifacts
+          mv zk-params-manifest.json release-artifacts/
+          if ls age_pk.*.bin 1>/dev/null 2>&1; then
+            mv age_pk.*.bin release-artifacts/
+          else
+            echo "ERROR: No proving key files (age_pk.*.bin) found" >&2
+            exit 1
+          fi
+          if ls age_vk.*.bin 1>/dev/null 2>&1; then
+            mv age_vk.*.bin release-artifacts/
+          else
+            echo "ERROR: No verification key files (age_vk.*.bin) found" >&2
+            exit 1
+          fi
+
+      - name: Extract VK_ID from manifest
+        id: extract-vk-id
+        run: |
+          VK_ID=$(jq -r '.vk_id' release-artifacts/zk-params-manifest.json)
+          echo "vk_id=${VK_ID}" >> $GITHUB_OUTPUT
+          echo "Extracted VK_ID: ${VK_ID}"
+
+      - name: Install Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v4
+        with:
+          node-version: '22'
+
+      - name: Install wrangler
+        run: npm install -g wrangler@${{ env.WRANGLER_VERSION }} --ignore-scripts
+
+      - name: Upload PK to R2 CDN
+        if: ${{ env.HAS_CF_TOKEN == 'true' }}
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          VK_ID=${{ steps.extract-vk-id.outputs.vk_id }}
+          wrangler r2 object put \
+            "cdn/age_pk.${VK_ID}.bin" \
+            --file "release-artifacts/age_pk.${VK_ID}.bin" \
+            --remote
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@cad07c2e89fa2edd6e2d7bab4c1aa38e53f76003 # v4.1.1
+
+      - name: Sign PK with Cosign (keyless)
+        run: |
+          VK_ID=${{ steps.extract-vk-id.outputs.vk_id }}
+          cosign sign-blob \
+            --yes \
+            --bundle "release-artifacts/age_pk.${VK_ID}.bin.cosign-bundle" \
+            "release-artifacts/age_pk.${VK_ID}.bin"
+
+      - name: Upload manifest and VK as artifacts
+        id: upload-manifest
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: zk-params-manifest
+          path: |
+            release-artifacts/zk-params-manifest.json
+            release-artifacts/age_vk.*.bin
+          retention-days: 5
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe # v2.6.1
+        with:
+          tag_name: params-${{ steps.extract-vk-id.outputs.vk_id }}
+          name: ZK Parameters ${{ steps.extract-vk-id.outputs.vk_id }}
+          body: |
+            ## ZK Parameter Generation
+
+            **VK_ID:** `${{ steps.extract-vk-id.outputs.vk_id }}`
+            **Reason:** ${{ inputs.reason }}
+
+            ### Artifacts
+            - `age_pk.${{ steps.extract-vk-id.outputs.vk_id }}.bin` - Proving key (uploaded to R2 CDN)
+            - `age_vk.${{ steps.extract-vk-id.outputs.vk_id }}.bin` - Verification key
+            - `zk-params-manifest.json` - Parameter manifest
+            - Cosign bundle for PK verification
+
+            ### Verify PK signature
+            ```bash
+            cosign verify-blob \
+              --bundle age_pk.${{ steps.extract-vk-id.outputs.vk_id }}.bin.cosign-bundle \
+              --certificate-identity-regexp 'https://github.com/provii/provii-crypto' \
+              --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+              age_pk.${{ steps.extract-vk-id.outputs.vk_id }}.bin
+            ```
+          files: |
+            release-artifacts/zk-params-manifest.json
+            release-artifacts/age_pk.*.bin
+            release-artifacts/age_pk.*.bin.cosign-bundle
+            release-artifacts/age_vk.*.bin
+          fail_on_unmatched_files: true
+          draft: false
+          prerelease: false
+
+      - name: Commit manifest and VK back to repo
+        run: |
+          VK_ID=${{ steps.extract-vk-id.outputs.vk_id }}
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          cp release-artifacts/zk-params-manifest.json zk-params-manifest.json
+          cp "release-artifacts/age_vk.${VK_ID}.bin" "age_vk.${VK_ID}.bin"
+          git add zk-params-manifest.json "age_vk.${VK_ID}.bin"
+          git commit -m "chore: update ZK params manifest and VK for VK_ID ${VK_ID}"
+          git push origin HEAD
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+
+  propagate:
+    name: Propagate to ${{ matrix.repo }}
+    needs: generate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    if: ${{ needs.generate.outputs.has_pat == 'true' }}
+    permissions:
+      contents: read
+    strategy:
+      matrix:
+        include:
+          - repo: provii-verifier
+            type: provii-verifier
+          - repo: provii-mobile-sdk
+            type: provii-mobile-sdk
+          - repo: provii-agegate
+            type: provii-agegate
+          - repo: provii-management
+            type: provii-management
+          - repo: provii-admin-portal
+            type: provii-admin-portal
+          - repo: provii-mobile
+            type: provii-mobile
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout target repo
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: provii/${{ matrix.repo }}
+          token: ${{ secrets.PROVII_PAT }}
+
+      - name: Checkout provii-crypto for propagation script
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: provii/provii-crypto
+          path: provii-crypto-scripts
+          sparse-checkout: scripts
+          token: ${{ secrets.PROVII_PAT }}
+
+      - name: Download manifest artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: zk-params-manifest
+          path: manifest/
+
+      - name: Run propagation script
+        run: |
+          bash provii-crypto-scripts/scripts/propagate-zk-params.sh \
+            --manifest manifest/zk-params-manifest.json \
+            --repo-type ${{ matrix.type }} \
+            --repo-path .
+
+      - name: Create branch and commit changes
+        run: |
+          VK_ID=${{ needs.generate.outputs.vk_id }}
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b "update-zk-params-${VK_ID}"
+          git add -- '*.json' '*.toml' '*.rs' '*.bin'
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+          git commit -m "chore: update ZK params to VK_ID ${VK_ID}"
+          git push origin "update-zk-params-${VK_ID}"
+
+      - name: Create pull request
+        env:
+          GH_TOKEN: ${{ secrets.PROVII_PAT }}
+        run: |
+          VK_ID=${{ needs.generate.outputs.vk_id }}
+          gh pr create \
+            --title "chore: update ZK parameters to VK_ID ${VK_ID}" \
+            --body "$(cat <<'PREOF'
+          ## ZK Parameter Update
+
+          Updates ZK parameters to VK_ID `${{ needs.generate.outputs.vk_id }}`.
+
+          **Reason:** ${{ inputs.reason }}
+
+          **Source:** [provii-crypto params-${{ needs.generate.outputs.vk_id }}](https://github.com/provii/provii-crypto/releases/tag/params-${{ needs.generate.outputs.vk_id }})
+
+          ### Changes
+          - Updated ZK parameter references to new VK_ID
+          - Updated verification key binary (if applicable)
+          - Updated manifest values
+
+          ---
+          *Automated by [generate-params](https://github.com/provii/provii-crypto/actions/workflows/generate-params.yml) workflow*
+          PREOF
+          )" \
+            --repo "provii/${{ matrix.repo }}"

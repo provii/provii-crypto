@@ -1,0 +1,407 @@
+name: CI
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE*'
+      - '.gitignore'
+      - 'CHANGELOG*'
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE*'
+      - '.gitignore'
+      - 'CHANGELOG*'
+
+permissions:
+  contents: read
+  checks: write
+  pull-requests: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  CARGO_INCREMENTAL: 0
+  CARGO_NET_RETRY: 10
+  RUSTUP_MAX_RETRIES: 10
+
+jobs:
+  format:
+    name: Check Formatting
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@b3b07ba8b418998c39fb20f53e8b695cdcc8de1b # stable
+        with:
+          toolchain: stable
+          components: rustfmt
+
+      - name: Check formatting
+        run: cargo fmt --all --check
+
+      - name: Check TOML formatting
+        run: |
+          cargo install taplo-cli --locked
+          taplo fmt --check
+
+  clippy:
+    name: Clippy Lints
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@b3b07ba8b418998c39fb20f53e8b695cdcc8de1b # stable
+        with:
+          toolchain: stable
+          components: clippy
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          shared-key: "ci-clippy"
+
+      - name: Run clippy
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+      - name: Check for unused dependencies
+        run: |
+          cargo install cargo-machete --locked
+          cargo machete
+
+  test:
+    name: Tests (${{ matrix.os }}, ${{ matrix.rust }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        rust: [stable, "1.85"]
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@b3b07ba8b418998c39fb20f53e8b695cdcc8de1b # stable
+        with:
+          toolchain: ${{ matrix.rust }}
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          shared-key: "ci-test-${{ matrix.os }}-${{ matrix.rust }}"
+
+      - name: Run tests
+        run: |
+          cargo test --workspace --locked 2>&1 | tee test-output.txt
+          exit ${PIPESTATUS[0]}
+        shell: bash
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: test-results-${{ matrix.os }}-${{ matrix.rust }}
+          path: test-output.txt
+          retention-days: 14
+
+  # Windows tests run separately as non-blocking due to frequent runner
+  # timeouts and cancellations on GitHub-hosted Windows runners.
+  test-windows:
+    name: Tests (windows-latest, stable)
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@b3b07ba8b418998c39fb20f53e8b695cdcc8de1b # stable
+        with:
+          toolchain: stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          shared-key: "ci-test-windows"
+
+      - name: Run tests
+        run: cargo test --workspace --locked
+        shell: bash
+
+  docs:
+    name: Documentation
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@b3b07ba8b418998c39fb20f53e8b695cdcc8de1b # stable
+        with:
+          toolchain: stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          shared-key: "ci-docs"
+
+      - name: Build documentation
+        run: cargo doc --workspace --no-deps --locked
+        env:
+          RUSTDOCFLAGS: -D warnings
+
+  build-check:
+    name: Build Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@b3b07ba8b418998c39fb20f53e8b695cdcc8de1b # stable
+        with:
+          toolchain: stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          shared-key: "ci-build"
+
+      - name: Verify Cargo.lock is up to date
+        run: cargo check --workspace --locked
+
+      - name: Build workspace
+        run: cargo build --workspace --locked
+
+      - name: Generate build provenance
+        uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
+        with:
+          subject-path: 'target/debug/libprovii_crypto*'
+
+  coverage:
+    name: Test Coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    if: github.actor != 'dependabot[bot]'
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@b3b07ba8b418998c39fb20f53e8b695cdcc8de1b # stable
+        with:
+          toolchain: stable
+          components: llvm-tools-preview
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          shared-key: "ci-coverage"
+
+      - name: Install cargo-llvm-cov
+        run: cargo install cargo-llvm-cov --locked --force
+
+      - name: Check coverage threshold
+        run: |
+          # --release speeds up BLS12-381/bellman crypto operations ~5x,
+          # cutting overall instrumented-test time from ~60 min to ~25 min.
+          # PR gate: 85%. Weekly deep check (slow-checks.yml) enforces 90%.
+          cargo llvm-cov --workspace --locked --release --fail-under-lines 85
+
+  benchmark:
+    name: Performance Benchmarks
+    if: github.actor != 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: [test]
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@b3b07ba8b418998c39fb20f53e8b695cdcc8de1b # stable
+        with:
+          toolchain: stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          shared-key: "ci-benchmark"
+
+      - name: Check for benchmarks
+        id: check-benches
+        run: |
+          if find . -path ./target -prune -o -path ./fuzz -prune -o -name "*.rs" -print | xargs grep -l "#\[bench\]" 2>/dev/null | grep -q .; then
+            echo "has_benches=true" >> $GITHUB_OUTPUT
+          elif find . -path ./target -prune -o -path ./fuzz -prune -o -name "bench*.rs" -print 2>/dev/null | grep -q .; then
+            echo "has_benches=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_benches=false" >> $GITHUB_OUTPUT
+            echo "No benchmarks found - skipping benchmark run"
+          fi
+
+      - name: Run benchmarks
+        if: steps.check-benches.outputs.has_benches == 'true'
+        run: cargo bench --workspace -- --noplot 2>&1 | tee benchmark-results.txt
+
+      - name: Upload benchmark results
+        if: steps.check-benches.outputs.has_benches == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: benchmark-results
+          path: benchmark-results.txt
+          retention-days: 30
+
+  pk-tests:
+    name: PK-Dependent Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check for Cloudflare credentials
+        id: cf-check
+        run: |
+          if [ -z "$CF_TOKEN" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::Skipping PK-dependent tests (CLOUDFLARE_API_TOKEN not configured)"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+
+      - name: Harden Runner
+        if: steps.cf-check.outputs.skip != 'true'
+        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout repository
+        if: steps.cf-check.outputs.skip != 'true'
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install Rust toolchain
+        if: steps.cf-check.outputs.skip != 'true'
+        uses: dtolnay/rust-toolchain@b3b07ba8b418998c39fb20f53e8b695cdcc8de1b # stable
+        with:
+          toolchain: stable
+
+      - name: Cache Rust dependencies
+        if: steps.cf-check.outputs.skip != 'true'
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          shared-key: "ci-pk-tests"
+
+      - name: Set up Node.js
+        if: steps.cf-check.outputs.skip != 'true'
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v4
+
+      - name: Install wrangler
+        if: steps.cf-check.outputs.skip != 'true'
+        run: npm install -g wrangler@4.92.0 --ignore-scripts
+
+      - name: Fetch proving key from R2
+        if: steps.cf-check.outputs.skip != 'true'
+        # Cloudflare WAF rejects GitHub Actions runner IPs with HTTP 403
+        # on unauthenticated CDN reads. Use wrangler r2 object get with
+        # CLOUDFLARE_API_TOKEN (same approach as release.yml).
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          VK_ID=$(jq -r '.vk_id' zk-params-manifest.json)
+          EXPECTED_PK_HASH=$(jq -r '.pk_blake2s_hash' zk-params-manifest.json)
+          wrangler r2 object get \
+            "cdn/age_pk.${VK_ID}.bin" \
+            --remote \
+            --file "age_pk.${VK_ID}.bin"
+          ACTUAL_PK_HASH=$(openssl dgst -blake2s256 "age_pk.${VK_ID}.bin" | awk '{print $NF}')
+          if [ "${ACTUAL_PK_HASH}" != "${EXPECTED_PK_HASH}" ]; then
+            echo "::error::PK blake2s256 mismatch: expected ${EXPECTED_PK_HASH}, got ${ACTUAL_PK_HASH}"
+            exit 1
+          fi
+          echo "PK fetched; blake2s256 verified against pinned manifest digest."
+          ls -lh "age_pk.${VK_ID}.bin"
+
+      - name: Run PK-dependent tests
+        if: steps.cf-check.outputs.skip != 'true'
+        run: cargo test --release --locked -p provii-crypto-e2e-tests -- --ignored
+
+  ci-success:
+    name: CI Success
+    needs: [format, clippy, test, docs, build-check, coverage, benchmark, pk-tests]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: always()
+    steps:
+      - name: Check job results
+        run: |
+          if [[ "${{ contains(needs.*.result, 'failure') }}" == "true" ]]; then
+            echo "One or more jobs failed"
+            exit 1
+          fi
+          echo "All jobs passed or were skipped"
