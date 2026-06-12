@@ -22,6 +22,6 @@ sapling-crypto.workspace = true
 workspace = true
 
 [dev-dependencies]
-rand_chacha = "0.3"
+rand_chacha = "0.9"
 proptest = "1.7"
 hex.workspace = true
