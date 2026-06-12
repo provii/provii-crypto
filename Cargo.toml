@@ -75,7 +75,7 @@ getrandom = { version = "0.2", features = ["js"] }
 zeroize = { version = "1.8", features = ["derive"] }
 worker = "0.7"
 byteorder = "1.5.0"
-criterion = "0.7.0"
+criterion = "0.8.2"
 rayon = "1.11.0"
 
 [workspace.lints.rust]
