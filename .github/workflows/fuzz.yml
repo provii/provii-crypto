@@ -62,10 +62,12 @@ jobs:
           path: fuzz/corpus/
 
       - name: Install cargo-fuzz
-        # Not --locked: cargo-fuzz's pinned lockfile drags an old rustix that
-        # fails to compile on current nightly (reserved rustc_* attributes).
-        # Resolving fresh picks a nightly-compatible rustix.
-        run: cargo install cargo-fuzz
+        # Build with the installed nightly explicitly. The repo rust-toolchain.toml
+        # pins 1.88.0, but cargo-fuzz's fresh-resolved deps (e.g. cargo-platform
+        # 0.3.3) now require rustc >= 1.91, so the pinned stable cannot build it.
+        # Not --locked: cargo-fuzz's pinned lockfile drags an old rustix that fails
+        # to compile on current nightly; resolving fresh picks a compatible rustix.
+        run: cargo +nightly install cargo-fuzz
 
       - name: Get fuzz targets
         id: targets
