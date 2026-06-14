@@ -1,0 +1,70 @@
+name: Publish crates to crates.io
+
+# Publishes the provii-crypto workspace crates to crates.io in dependency order.
+# Manual dispatch only. Run with dry_run=true first to validate packaging, then
+# dry_run=false to publish. Idempotent: a crate version already on crates.io is
+# skipped, so a re-run after a partial failure resumes cleanly.
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Validate packaging only (no upload)'
+        required: false
+        default: 'true'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-crates
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish crates
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@b3b07ba8b418998c39fb20f53e8b695cdcc8de1b # stable
+        with:
+          toolchain: "1.88.0"
+
+      - name: Publish in dependency order
+        # The input is routed through an env var (never interpolated directly into
+        # the shell) so a crafted dispatch value cannot inject commands.
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          if [ -z "${CARGO_REGISTRY_TOKEN:-}" ] && [ "${DRY_RUN}" != "true" ]; then
+            echo "::error::CARGO_REGISTRY_TOKEN is not set; cannot publish"
+            exit 1
+          fi
+          VER=$(grep -m1 -E '^version *= *"' Cargo.toml | sed -E 's/.*"([^"]+)".*/\1/')
+          echo "Workspace version: ${VER}"
+          CRATES="provii-crypto-commons provii-crypto-sig-redjubjub provii-crypto-commit provii-crypto-public-inputs provii-crypto-protocol provii-crypto-verifier provii-crypto-circuit-age provii-crypto-prover"
+          for c in ${CRATES}; do
+            echo "::group::${c} ${VER}"
+            if [ "${DRY_RUN}" = "true" ]; then
+              cargo publish -p "${c}" --dry-run --no-verify --allow-dirty
+            else
+              if curl -fsS "https://crates.io/api/v1/crates/${c}/${VER}" >/dev/null 2>&1; then
+                echo "${c} ${VER} already on crates.io, skipping"
+              else
+                cargo publish -p "${c}"
+              fi
+            fi
+            echo "::endgroup::"
+          done
+          echo "Done."
