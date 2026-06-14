@@ -59,13 +59,23 @@ jobs:
             if [ "${DRY_RUN}" = "true" ]; then
               cargo publish -p "${c}" --dry-run --no-verify --allow-dirty
             else
-              if curl -fsS "https://crates.io/api/v1/crates/${c}/${VER}" >/dev/null 2>&1; then
-                echo "${c} ${VER} already on crates.io, skipping"
-              else
-                # --no-verify: the workspace already verify-built when the first
-                # crates published; re-runs only need to package + upload the
-                # remaining crates (crates.io new-crate rate limit gates the rest).
-                cargo publish -p "${c}" --no-verify
+              # --no-verify: the workspace already verify-built when the first
+              # crates published; re-runs only need to package + upload. An
+              # "already exists" error is treated as an idempotent skip so a
+              # re-run after a crates.io new-crate rate-limit window resumes
+              # cleanly without a fragile pre-check.
+              set +e
+              out=$(cargo publish -p "${c}" --no-verify 2>&1)
+              rc=$?
+              set -e
+              printf '%s\n' "${out}"
+              if [ ${rc} -ne 0 ]; then
+                if printf '%s' "${out}" | grep -qi "already exists on crates.io"; then
+                  echo "${c} ${VER} already published; skipping"
+                else
+                  echo "::error::publish of ${c} failed"
+                  exit 1
+                fi
               fi
             fi
             echo "::endgroup::"
