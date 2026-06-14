@@ -62,7 +62,10 @@ jobs:
               if curl -fsS "https://crates.io/api/v1/crates/${c}/${VER}" >/dev/null 2>&1; then
                 echo "${c} ${VER} already on crates.io, skipping"
               else
-                cargo publish -p "${c}"
+                # --no-verify: the workspace already verify-built when the first
+                # crates published; re-runs only need to package + upload the
+                # remaining crates (crates.io new-crate rate limit gates the rest).
+                cargo publish -p "${c}" --no-verify
               fi
             fi
             echo "::endgroup::"
